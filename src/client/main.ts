@@ -1,5 +1,9 @@
 /**
- * Hello world
+ * NOTES:
+ * - This is the client side that's going to be accessing the smart contract,
+ * sending over instructions, etc.
+ * - This Client code is mostly from the solana/web3 library.
+ * - Even on the client side you still need to do the serialize/deserialize
  */
 
 import {
