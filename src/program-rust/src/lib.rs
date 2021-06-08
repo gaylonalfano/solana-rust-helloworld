@@ -29,6 +29,7 @@ deducting lamports (everyone doesn't mind receiving money).
 */
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_program::{
+    log::sol_log_compute_units,
     account_info::{next_account_info, AccountInfo},
     entrypoint,
     entrypoint::ProgramResult,
@@ -46,7 +47,9 @@ use solana_program::{
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub struct GreetingAccount {
     /// number of greetings
-    pub counter: u32,
+    // pub counter: u32,
+    /// message string
+    pub txt: String
 }
 
 // Declare and export the program's entrypoint
@@ -61,7 +64,7 @@ pub fn process_instruction(
     // NOTE "&" is for declaring Type
     program_id: &Pubkey, // Public key of the account the hello world program was loaded into/lives inside
     accounts: &[AccountInfo], // The account to say hello to
-    _instruction_data: &[u8], // Ignored, all helloworld instructions are hellos
+    instruction_data: &[u8], // NOTE _instruction_data is convention when not used
 ) -> ProgramResult {
     // Can log and view using command: solana logs -u localhost
     // NOTE Apparently println!() isn't as performant as msg!()
@@ -92,25 +95,59 @@ pub fn process_instruction(
         return Err(ProgramError::IncorrectProgramId);
     }
 
-    // Now we get to what we actually want to do for this smart contract
-    // Increment and store the number of times the account has been greeted
-    // NOTE Once we get the data in account.data in its proper form (after encoding/decoding)
-    // we can do what we want (e.g, increment a number, etc.). We use Borsh library to
-    // take binary and DESERIALIZES it (so we can modify), then give Borsh a data type so that
-    // it can SERIALIZE the data type back into binary format.
-    // NOTE Below we're decoding "data" from an arbitrary bytearray, to an actual Type
-    // instance (greeting_account is a type instance of GreetingAccount type).
-    let mut greeting_account = GreetingAccount::try_from_slice(&account.data.borrow())?;
-    // Now that data is decoded, we do what we want to data (e.g., increment).
-    greeting_account.counter += 1;
-    // Next we encode it all back into the data.
-    greeting_account.serialize(&mut &mut account.data.borrow_mut()[..])?;
-    // NOTE The above serialize() line could be split up as well for alternative syntax:
-    // let data = &mut &mut account.data.borrow_mut()[..];
-    // greeting_account.serialize(data)?;
+    // ===== Sending string messages instead of just counting =====
+    // https://youtu.be/gA7hFdq2h9Q?t=5270
+    msg!("Start instruction decode");
+    // We're passing in the data as a binary instance of the GreetingAccount type
+    // from the client side. Taking the data as an array of bytes and trying to
+    // decode it using the try_from_slice() method.
+    // NOTE map_err() allows us to load a message if the decoding fails
+    // NOTE Technically we don't have to instantiate a GreetingAccount (message).
+    // The reason he did this is to ensure we're getting the correct data values.
+    // This is highlighting that you can pass ANY type of data (instruction_data),
+    // not just &[u8], but also objects, etc. &[u8] is really flexible so allows
+    // more types of data to be sent.
+    let message = GreetingAccount::try_from_slice(instruction_data).map_err(|err| {
+        msg!("Receiving message as string utf8 failed, {:?}", err);
+        ProgramError::InvalidInstructionData
+    })?;
+    msg!("Greeting passed to program is {:?}", message);
 
-    // Finally wrap it all up with a logging message.
-    msg!("Greeted {} time(s)!", greeting_account.counter);
+    // Take the same instance of data from the account we need to actually update
+    let data = &mut &mut account.data.borrow_mut();
+    msg!("Account data: {:?}", data);
+    msg!("Start save instruction into data");
+    // Then we find a range inside the data that is the same size as instruction_data
+    // so we can copy the parameter data into the actual account data.
+    // It seems like we're essentially inserting the parameter data
+    // NOTE This is Rust array slicing syntax i.e. Python: data[:len(instruction_data)]
+    data[..instruction_data.len()].copy_from_slice(&instruction_data);
+    
+    sol_log_compute_units();
+    msg!("Was sent message {}!", message.txt);
+
+
+    // // ===== helloworld default =====
+    // // Now we get to what we actually want to do for this smart contract
+    // // Increment and store the number of times the account has been greeted
+    // // NOTE Once we get the data in account.data in its proper form (after encoding/decoding)
+    // // we can do what we want (e.g, increment a number, etc.). We use Borsh library to
+    // // take binary and DESERIALIZES it (so we can modify), then give Borsh a data type so that
+    // // it can SERIALIZE the data type back into binary format.
+    // // NOTE Below we're decoding "data" from an arbitrary bytearray, to an actual Type
+    // // instance (greeting_account is a type instance of GreetingAccount type).
+    // let mut greeting_account = GreetingAccount::try_from_slice(&account.data.borrow())?;
+    // // Now that data is decoded, we do what we want to data (e.g., increment).
+    // greeting_account.counter += 1;
+    // // Next we encode it all back into the data.
+    // greeting_account.serialize(&mut &mut account.data.borrow_mut()[..])?;
+    // // NOTE The above serialize() line could be split up as well for alternative syntax:
+    // // let data = &mut &mut account.data.borrow_mut()[..];
+    // // greeting_account.serialize(data)?;
+
+    // // Finally wrap it all up with a logging message.
+    // msg!("Greeted {} time(s)!", greeting_account.counter);
+    // // ================================
 
     Ok(())
 }
@@ -146,21 +183,24 @@ mod test {
         assert_eq!(
             GreetingAccount::try_from_slice(&accounts[0].data.borrow())
                 .unwrap()
-                .counter,
+                // .counter,
+                .txt,
             0
         );
         process_instruction(&program_id, &accounts, &instruction_data).unwrap();
         assert_eq!(
             GreetingAccount::try_from_slice(&accounts[0].data.borrow())
                 .unwrap()
-                .counter,
+                // .counter,
+                .txt,
             1
         );
         process_instruction(&program_id, &accounts, &instruction_data).unwrap();
         assert_eq!(
             GreetingAccount::try_from_slice(&accounts[0].data.borrow())
                 .unwrap()
-                .counter,
+                // .counter,
+                .txt,
             2
         );
     }

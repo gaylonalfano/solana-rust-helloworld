@@ -65,14 +65,21 @@ const PROGRAM_KEYPAIR_PATH = path.join(PROGRAM_PATH, 'helloworld-keypair.json');
  * The state of a greeting account managed by the hello world program
  */
 class GreetingAccount {
-  // NOTE This class is analogous to Rust struct type (pub struct GreetingAccount)
-  counter = 0;
-  // NOTE The borsh library requires that we use a constructor like below
-  constructor(fields: {counter: number} | undefined = undefined) {
-    // Any new class properties would need to be set within this scope
+  // // NOTE This class is analogous to Rust struct type (pub struct GreetingAccount)
+  // counter = 0;
+  // // NOTE The borsh library requires that we use a constructor like below
+  // constructor(fields: {counter: number} | undefined = undefined) {
+  //   // Any new class properties would need to be set within this scope
+  //   if (fields) {
+  //     this.counter = fields.counter;
+  //     // this.newField = fields.newField;
+  //   }
+  // }
+  // === Sending a string message ===
+  txt = '';
+  constructor(fields: {txt: string} | undefined = undefined) {
     if (fields) {
-      this.counter = fields.counter;
-      // this.newField = fields.newField;
+      this.txt = fields.txt;
     }
   }
 }
@@ -85,17 +92,29 @@ const GreetingSchema = new Map([
   // It needs the client side Type (GreetingAccount), and it also needs
   // metadata from our Rust program. This is all provided to the
   // borsh.serialize() method below (see GREETING_SIZE).
-  [GreetingAccount, {kind: 'struct', fields: [['counter', 'u32']]}],
+  // [GreetingAccount, {kind: 'struct', fields: [['counter', 'u32']]}],
+  [GreetingAccount, {kind: 'struct', fields: [['txt', 'String']]}],
 ]);
 
 /**
  * The expected size of each greeting account.
  */
+// NOTE Creating a new instance of GreetingAccount to hardcode/limit the size
+// of the data for Borsh. Recall that the data size is static once set!
+const sampleGreeter = new GreetingAccount();
+// Set the string length (eg 12).
+// NOTE This length MUST match whatever we pass to await sayHello() in main!
+sampleGreeter.txt = '000000000000';
 // NOTE This serializes (encode) to the destination data type (Uint8Array which is an
 // Array of 8 bytes) and it's taking out the length (size). This is how it knows how
 // much data size is required.
-const GREETING_SIZE = borsh.serialize(GreetingSchema, new GreetingAccount())
-  .length;
+const GREETING_SIZE = borsh.serialize(
+  GreetingSchema,
+  // new GreetingAccount(),
+  // UPDATE Replace the type with our sampleGreeter
+  sampleGreeter,
+).length;
+console.log('Greeting account size:', GREETING_SIZE);
 
 /**
  * Establish a connection to the cluster
@@ -248,14 +267,26 @@ export async function checkProgram(): Promise<void> {
 /**
  * Say hello
  */
-export async function sayHello(): Promise<void> {
+export async function sayHello(msg: string): Promise<void> {
   // Get the account affected by our program
   console.log('Saying hello to', greetedPubkey.toBase58());
+  // Create a new GreetingAccount instance to ensure data structure aligns for Borsh
+  const messageAccount = new GreetingAccount();
+  // Set txt property to equal the msg argument
+  messageAccount.txt = msg;
   // Create a new transaction instruction that we'll add to transaction
   const instruction = new TransactionInstruction({
     keys: [{pubkey: greetedPubkey, isSigner: false, isWritable: true}],
     programId, // The controlling program
-    data: Buffer.alloc(0), // Any data sent over (none in this example). All instructions are hellos
+    // data: Buffer.alloc(0), // Any data sent over (none in this example). All instructions are hellos
+    // NOTE 'data' (below). All metadata from GreetingAccount and GreetingSchema MUST to be passed
+    // to the program (Rust) in their correct form, so that's why this Borsh serialization
+    // is necessary.
+    // NOTE We're wrapping in a Node Buffer so it can go over to the program as a blob.
+    // Then, in the program, it can be deserialized (if needed) and then inserted into
+    // the account's data (which is a bytearray &[u8]) via:
+    // data[..instruction_data.len()].copy_from_slice(&instruction_data);
+    data: Buffer.from(borsh.serialize(GreetingSchema, messageAccount)),
   });
   await sendAndConfirmTransaction(
     connection, // Run on same network
@@ -269,6 +300,7 @@ export async function sayHello(): Promise<void> {
  * Report the number of times the greeted account has been said hello to
  */
 export async function reportGreetings(): Promise<void> {
+  console.log('Retrieving message from greeting account');
   // Retrieve the greetedAccount/AccountInfo
   // NOTE Borsh serialize/deserialize is very similar to how it works in our
   // Rust program as well.
@@ -279,6 +311,7 @@ export async function reportGreetings(): Promise<void> {
   // Retrieve data from this account on the network
   // Perform some deserializations (decode) (binary -> data type)
   // so that we have a JS type we can work with in JS.
+  // NOTE This will error if our data size doesn't match between client/program
   const greeting: GreetingAccount = borsh.deserialize(
     GreetingSchema,
     GreetingAccount,
@@ -286,10 +319,29 @@ export async function reportGreetings(): Promise<void> {
   );
   // Last, we now have a GreetingAccount class/object instance,
   // so we can attempt to display the counter (data) value
+  // console.log(
+  //   greetedPubkey.toBase58(),
+  //   'has been greeted',
+  //   greeting.counter,
+  //   'time(s)',
+  // );
   console.log(
+    'Account',
     greetedPubkey.toBase58(),
-    'has been greeted',
-    greeting.counter,
-    'time(s)',
+    'has been sent message: ',
+    greeting.txt,
   );
 }
+
+// Example logs after successfull execution:
+//   Log Messages:
+// Program 3Y99wxqg2M14f9pGXFTNSUDqPvRRwFx1Jc3YTgorvCPG invoke [1]
+// Program log: Hello World Rust program entrypoint
+// Program log: Start instruction decode
+// Program log: Greeting passed to program is GreetingAccount { txt: "Hello Worl
+// Program log: Account data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+// Program log: Start save instruction into data
+// Program consumption: 190065 units remaining
+// Program log: Was sent message Hello World!!
+// Program 3Y99wxqg2M14f9pGXFTNSUDqPvRRwFx1Jc3YTgorvCPG consumed 10572 of 200000
+// Program 3Y99wxqg2M14f9pGXFTNSUDqPvRRwFx1Jc3YTgorvCPG success
