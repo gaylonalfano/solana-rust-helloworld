@@ -28,7 +28,7 @@ async function main() {
 
   // Say hello to an account
   // NOTE msg must be same length as account data for borsh!
-  await sayHello('Hello World!');
+  await sayHello('Hello1234567');
 
   // Find out how many times that account has been greeted
   await reportGreetings();
